@@ -49,6 +49,7 @@
     <!-- Tabs -->
     <div class="tabs">
       <button class="tab active" data-tab="thematics">Thématiques</button>
+      <button class="tab" data-tab="catchup">Rattrapage</button>
       <button class="tab" data-tab="logs">Logs</button>
       <button class="tab" data-tab="settings">Config</button>
     </div>
@@ -60,6 +61,20 @@
       </div>
       <div id="thematicsList"></div>
       <button class="btn btn-primary" id="addThematicBtn">+ Ajouter une thématique</button>
+    </div>
+
+    <!-- Catchup Tab -->
+    <div class="tab-content" id="tab-catchup">
+      <div class="catchup-info">
+        <p>🔄 Récupère les anciens commentaires via l'API LinkedIn et envoie les DMs manqués.</p>
+        <p class="catchup-warning">⚠️ Nécessite d'être connecté à LinkedIn dans cet onglet.</p>
+      </div>
+      <div class="catchup-actions">
+        <button class="btn btn-scan" id="catchupFetchPostsBtn">📡 Charger mes posts</button>
+      </div>
+      <div id="catchupPostsList" class="catchup-posts-list"></div>
+      <div id="catchupStatus" class="catchup-status"></div>
+      <button class="btn btn-primary" id="catchupRunBtn" style="display:none">🚀 Lancer le rattrapage</button>
     </div>
 
     <!-- Logs Tab -->

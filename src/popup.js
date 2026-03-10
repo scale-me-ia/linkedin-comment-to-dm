@@ -35,6 +35,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('debugToggle').addEventListener('change', onSettingChange);
   document.getElementById('dynamicMsgToggle').addEventListener('change', onSettingChange);
   document.getElementById('resetBtn').addEventListener('click', resetAll);
+  document.getElementById('catchupFetchPostsBtn').addEventListener('click', catchupFetchPosts);
+  document.getElementById('catchupRunBtn').addEventListener('click', catchupRun);
 
   // Tabs
   document.querySelectorAll('.tab').forEach(tab => {
@@ -427,6 +429,134 @@ async function saveThematic() {
   renderThematics();
   closeModal();
   notifyContentScript();
+}
+
+// ── Catchup ────────────────────────────────────────────────
+
+let catchupPosts = [];
+let selectedCatchupPostUrns = new Set();
+
+async function catchupFetchPosts() {
+  const btn = document.getElementById('catchupFetchPostsBtn');
+  const status = document.getElementById('catchupStatus');
+  btn.disabled = true;
+  btn.textContent = '⏳ Chargement...';
+  status.textContent = '';
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url?.includes('linkedin.com')) {
+      alert('Ouvrez LinkedIn dans l\'onglet actif.');
+      btn.disabled = false;
+      btn.textContent = '📡 Charger mes posts';
+      return;
+    }
+
+    chrome.tabs.sendMessage(tab.id, { type: 'CATCHUP_FETCH_POSTS' }, (response) => {
+      btn.disabled = false;
+      btn.textContent = '📡 Charger mes posts';
+
+      if (chrome.runtime.lastError || response?.error) {
+        status.innerHTML = `<span style="color:#ff4444">❌ Erreur : ${escapeHtml(response?.error || chrome.runtime.lastError?.message || 'Inconnue')}</span>`;
+        return;
+      }
+
+      catchupPosts = response?.posts || [];
+      if (catchupPosts.length === 0) {
+        status.textContent = 'Aucun post trouvé.';
+        return;
+      }
+
+      renderCatchupPosts();
+      document.getElementById('catchupRunBtn').style.display = 'block';
+      status.textContent = `${catchupPosts.length} posts chargés. Sélectionne ceux à scanner.`;
+    });
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '📡 Charger mes posts';
+    status.innerHTML = `<span style="color:#ff4444">❌ ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+function renderCatchupPosts() {
+  const list = document.getElementById('catchupPostsList');
+  selectedCatchupPostUrns = new Set(catchupPosts.map(p => p.urn)); // Select all by default
+
+  list.innerHTML = catchupPosts.map((p, i) => {
+    const preview = (p.text || '').substring(0, 80).replace(/\n/g, ' ');
+    const comments = p.numComments || '?';
+    return `
+      <div class="catchup-post-card" data-index="${i}">
+        <label class="catchup-post-check">
+          <input type="checkbox" data-urn="${escapeHtml(p.urn)}" checked>
+          <div class="catchup-post-info">
+            <div class="catchup-post-preview">${escapeHtml(preview)}${p.text?.length > 80 ? '…' : ''}</div>
+            <div class="catchup-post-meta">💬 ${comments} commentaires</div>
+          </div>
+        </label>
+      </div>
+    `;
+  }).join('');
+
+  // Delegated checkbox listener
+  list.addEventListener('change', (e) => {
+    if (e.target.type === 'checkbox') {
+      const urn = e.target.dataset.urn;
+      if (e.target.checked) selectedCatchupPostUrns.add(urn);
+      else selectedCatchupPostUrns.delete(urn);
+    }
+  });
+}
+
+async function catchupRun() {
+  if (selectedCatchupPostUrns.size === 0) {
+    alert('Sélectionne au moins un post !');
+    return;
+  }
+
+  const btn = document.getElementById('catchupRunBtn');
+  const status = document.getElementById('catchupStatus');
+  btn.disabled = true;
+  btn.textContent = '⏳ Rattrapage en cours...';
+  status.textContent = 'Scan des commentaires...';
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url?.includes('linkedin.com')) {
+      alert('Ouvrez LinkedIn dans l\'onglet actif.');
+      btn.disabled = false;
+      btn.textContent = '🚀 Lancer le rattrapage';
+      return;
+    }
+
+    chrome.tabs.sendMessage(tab.id, {
+      type: 'CATCHUP_RUN',
+      postUrns: [...selectedCatchupPostUrns],
+    }, (response) => {
+      btn.disabled = false;
+      btn.textContent = '🚀 Lancer le rattrapage';
+
+      if (chrome.runtime.lastError || response?.error) {
+        status.innerHTML = `<span style="color:#ff4444">❌ ${escapeHtml(response?.error || chrome.runtime.lastError?.message || 'Erreur')}</span>`;
+        return;
+      }
+
+      const r = response;
+      let statusHtml = `✅ <strong>Rattrapage terminé</strong><br>`;
+      statusHtml += `📋 ${r.postsScanned} posts scannés<br>`;
+      statusHtml += `💬 ${r.commentsScanned} commentaires analysés<br>`;
+      statusHtml += `🎯 ${r.matches} match(es) → DMs en attente<br>`;
+      if (r.errors?.length > 0) {
+        statusHtml += `<br>⚠️ ${r.errors.length} erreur(s) :<br>`;
+        r.errors.forEach(e => { statusHtml += `<span style="color:#ff9900;font-size:10px">${escapeHtml(e)}</span><br>`; });
+      }
+      status.innerHTML = statusHtml;
+    });
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '🚀 Lancer le rattrapage';
+    status.innerHTML = `<span style="color:#ff4444">❌ ${escapeHtml(e.message)}</span>`;
+  }
 }
 
 // ── Logs ───────────────────────────────────────────────────

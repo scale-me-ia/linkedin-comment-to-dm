@@ -266,6 +266,15 @@
         const posts = scanProfilePosts();
         sendResponse({ posts });
       }
+      if (msg.type === 'CATCHUP_FETCH_POSTS') {
+        catchupFetchPosts().then(posts => sendResponse({ posts })).catch(err => sendResponse({ error: err.message }));
+      }
+      if (msg.type === 'CATCHUP_FETCH_COMMENTS') {
+        catchupFetchComments(msg.activityUrn).then(result => sendResponse(result)).catch(err => sendResponse({ error: err.message }));
+      }
+      if (msg.type === 'CATCHUP_RUN') {
+        catchupRun(msg.postUrns).then(result => sendResponse(result)).catch(err => sendResponse({ error: err.message }));
+      }
       return true;
     });
 
@@ -455,7 +464,11 @@
     while (actionQueue.length > 0) {
       const match = actionQueue.shift();
       try {
-        await processMatch(match);
+        if (match.fromCatchup) {
+          await processMatchWrapped(match);
+        } else {
+          await processMatch(match);
+        }
       } catch (err) {
         log('error', `Process error for ${match.authorName}:`, err);
       }
@@ -637,6 +650,167 @@
       thematic: match.thematic.name,
     });
     await chrome.storage.local.set({ [STORAGE_KEYS.ACTION_LOG]: logs });
+  }
+
+  // ── Catchup (Fetch old comments via API) ──────────────────
+
+  const linkedInAPI = new (window.ScaleMeLinkedInAPI || class { async getMyPosts() { return []; } async getAllComments() { return []; } })();
+
+  /**
+   * Fetch user's recent posts via Voyager API
+   */
+  async function catchupFetchPosts() {
+    try {
+      const posts = await linkedInAPI.getMyPosts(20);
+      log('info', `📡 API: fetched ${posts.length} posts`);
+      return posts;
+    } catch (err) {
+      log('error', 'API fetch posts error:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Fetch all comments on a specific post via API
+   */
+  async function catchupFetchComments(activityUrn) {
+    try {
+      const comments = await linkedInAPI.getAllComments(activityUrn);
+      log('info', `📡 API: fetched ${comments.length} comments on ${activityUrn.slice(-10)}`);
+      return { comments };
+    } catch (err) {
+      log('error', 'API fetch comments error:', err);
+      throw err;
+    }
+  }
+
+  /**
+   * Run full catchup: fetch comments on specified posts, match keywords, queue actions
+   */
+  async function catchupRun(postUrns) {
+    const results = { postsScanned: 0, commentsScanned: 0, matches: 0, errors: [] };
+
+    try {
+      // If no specific URNs, fetch user's recent posts
+      let posts = [];
+      if (postUrns && postUrns.length > 0) {
+        posts = postUrns.map(urn => ({ urn }));
+      } else {
+        posts = await linkedInAPI.getMyPosts(10);
+      }
+
+      log('info', `🔄 Catchup: scanning ${posts.length} posts...`);
+      results.postsScanned = posts.length;
+
+      for (const post of posts) {
+        try {
+          const comments = await linkedInAPI.getAllComments(post.urn);
+          results.commentsScanned += comments.length;
+
+          for (const comment of comments) {
+            // Check if already processed
+            const commentId = getCommentId(post.urn, comment.authorName, comment.text.toLowerCase());
+            if (processedComments.has(commentId)) continue;
+
+            // Check against thematics
+            for (const thematic of thematics) {
+              if (thematic.postUrns?.length > 0 && !thematic.postUrns.includes(post.urn)) continue;
+              
+              const kw = thematic.keywords.find(k => comment.text.toLowerCase().includes(k.toLowerCase()));
+              if (kw) {
+                processedComments.add(commentId);
+                results.matches++;
+
+                const match = {
+                  commentId,
+                  postUrn: post.urn,
+                  commentText: comment.text,
+                  authorName: comment.authorName,
+                  authorProfileUrl: comment.authorProfileUrl,
+                  matchedKeyword: kw,
+                  thematic,
+                  commentElement: null, // No DOM element for API-fetched comments
+                  timestamp: comment.timestamp || Date.now(),
+                  fromCatchup: true,
+                };
+
+                log('info', `🎯 Catchup match: "${kw}" by ${comment.authorName}`);
+
+                // Queue for DM only (can't reply to comment without DOM element)
+                enqueueAction(match);
+                break; // One match per comment
+              }
+            }
+          }
+
+          // Delay between posts to avoid rate limiting
+          await sleep(2000 + Math.random() * 3000);
+
+        } catch (err) {
+          log('error', `Catchup error on post ${post.urn}:`, err);
+          results.errors.push(`${post.urn}: ${err.message}`);
+        }
+      }
+
+      // Save processed comments
+      await saveProcessedComments();
+
+      log('info', `✅ Catchup done: ${results.postsScanned} posts, ${results.commentsScanned} comments, ${results.matches} matches`);
+    } catch (err) {
+      log('error', 'Catchup run error:', err);
+      results.errors.push(err.message);
+    }
+
+    return results;
+  }
+
+  // ── Override processMatch for catchup (DM only, skip reply) ──
+
+  const _originalProcessMatch = processMatch;
+
+  // Redefine processMatch to handle catchup (no DOM element)
+  async function processMatchWrapped(match) {
+    if (match.fromCatchup) {
+      // Catchup: only send DM (no comment element to reply to)
+      const firstName = extractFirstName(match.authorName);
+      const vars = {
+        firstName,
+        fullName: match.authorName,
+        link: match.thematic.leadMagnetUrl,
+        keyword: match.matchedKeyword,
+        thematic: match.thematic.name,
+      };
+
+      // Wait before DM
+      const dmDelayMin = (match.thematic.dmDelayMin || 180) * 1000;
+      const dmDelayMax = (match.thematic.dmDelayMax || 600) * 1000;
+      log('info', `⏳ [Catchup] Waiting ${Math.round(dmDelayMin/1000)}-${Math.round(dmDelayMax/1000)}s before DM to ${match.authorName}...`);
+      await randomDelay({ min: dmDelayMin, max: dmDelayMax });
+
+      const dmText = generateDynamicDM(match.thematic.dmTemplate, vars);
+      if (settings.dryRun) {
+        log('info', `🏜️ [DRY/Catchup] DM → ${match.authorName}: "${dmText}"`);
+      } else {
+        const ok = await sendDM(match.authorName, dmText);
+        if (ok) {
+          dailyCounters.dms++;
+          saveDailyCounters();
+          logAction(match, 'catchup_dm_sent');
+          log('info', `📩 [Catchup] DM sent to ${match.authorName}`);
+        } else {
+          logAction(match, 'catchup_dm_failed');
+        }
+      }
+
+      chrome.runtime.sendMessage({
+        type: 'SHOW_NOTIFICATION',
+        title: `🔄 Rattrapage — ${match.thematic.name}`,
+        message: `${settings.dryRun ? '[DRY] ' : ''}DM → ${match.authorName} ("${match.matchedKeyword}")`,
+      });
+    } else {
+      // Normal flow: reply + DM
+      await processMatch(match);
+    }
   }
 
   // ── Status Badge ─────────────────────────────────────────
