@@ -276,24 +276,72 @@
 
   function scanProfilePosts() {
     const posts = [];
-    const postElements = document.querySelectorAll(SELECTORS.POST_CONTAINER);
-    
+
+    // Multiple selector strategies to cover feed, profile activity, and post pages
+    const POST_SELECTORS = [
+      '.feed-shared-update-v2',                           // Feed
+      '.profile-creator-shared-feed-update__container',    // Profile activity
+      '.occludable-update',                                // Generic update wrapper
+      '[data-urn*="activity"]',                            // URN-based fallback
+      'article',                                           // Semantic fallback
+    ];
+
+    const TEXT_SELECTORS = [
+      '.feed-shared-update-v2__description .update-components-text',
+      '.update-components-text',
+      '.feed-shared-text',
+      '.break-words',
+      '[dir="ltr"] span[aria-hidden="true"]',
+    ];
+
+    // Try each post selector until we find posts
+    let postElements = [];
+    for (const sel of POST_SELECTORS) {
+      postElements = document.querySelectorAll(sel);
+      if (postElements.length > 0) {
+        log('debug', `Found ${postElements.length} posts with selector: ${sel}`);
+        break;
+      }
+    }
+
+    // Fallback: just grab all visible text blocks that look like posts
+    if (postElements.length === 0) {
+      log('debug', 'No posts found with standard selectors, trying broad scan...');
+      postElements = document.querySelectorAll('[data-urn]');
+    }
+
     for (const postEl of postElements) {
-      const urn = postEl.getAttribute(SELECTORS.POST_URN) || '';
-      const textEl = postEl.querySelector(SELECTORS.POST_TEXT) || 
-                     postEl.querySelector('.update-components-text');
-      const authorEl = postEl.querySelector(SELECTORS.POST_AUTHOR);
+      const urn = postEl.getAttribute('data-urn') || '';
       
-      if (textEl) {
+      // Try each text selector
+      let textContent = '';
+      for (const textSel of TEXT_SELECTORS) {
+        const textEl = postEl.querySelector(textSel);
+        if (textEl && textEl.textContent.trim().length > 20) {
+          textContent = textEl.textContent.trim();
+          break;
+        }
+      }
+      
+      // If still no text, grab the element's own text (trimmed, first 500 chars)
+      if (!textContent) {
+        const rawText = postEl.textContent.trim();
+        if (rawText.length > 50) {
+          textContent = rawText.substring(0, 500);
+        }
+      }
+
+      if (textContent) {
+        const authorEl = postEl.querySelector('.update-components-actor__name, .feed-shared-actor__name');
         posts.push({
           urn,
-          text: textEl.textContent.trim(),
+          text: textContent,
           author: authorEl ? authorEl.textContent.trim() : '',
         });
       }
     }
     
-    log('info', `📋 Scanned ${posts.length} posts from current page`);
+    log('info', `📋 Scanned ${posts.length} posts from current page (URL: ${window.location.pathname})`);
     return posts;
   }
 
