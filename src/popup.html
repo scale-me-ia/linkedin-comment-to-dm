@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scale Me — LinkedIn Comment-to-DM</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <span class="logo">⚡</span>
+        <h1>Scale Me</h1>
+      </div>
+      <div class="header-right">
+        <label class="toggle">
+          <input type="checkbox" id="masterToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </header>
+
+    <!-- Status Bar -->
+    <div class="status-bar" id="statusBar">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Inactif</span>
+    </div>
+
+    <!-- Daily Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="repliesCount">0</div>
+        <div class="stat-label">Réponses</div>
+        <div class="stat-limit" id="repliesLimit">/25</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="dmsCount">0</div>
+        <div class="stat-label">DMs</div>
+        <div class="stat-limit" id="dmsLimit">/20</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="queueCount">0</div>
+        <div class="stat-label">En attente</div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" data-tab="thematics">Thématiques</button>
+      <button class="tab" data-tab="logs">Logs</button>
+      <button class="tab" data-tab="settings">Config</button>
+    </div>
+
+    <!-- Thematics Tab -->
+    <div class="tab-content active" id="tab-thematics">
+      <div id="thematicsList"></div>
+      <button class="btn btn-primary" id="addThematicBtn">+ Ajouter une thématique</button>
+    </div>
+
+    <!-- Logs Tab -->
+    <div class="tab-content" id="tab-logs">
+      <div id="logsList" class="logs-list"></div>
+      <button class="btn btn-secondary" id="clearLogsBtn">Vider les logs</button>
+    </div>
+
+    <!-- Settings Tab -->
+    <div class="tab-content" id="tab-settings">
+      <div class="setting-row">
+        <label>Mode test (dry run)</label>
+        <label class="toggle">
+          <input type="checkbox" id="dryRunToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <label>Notifications</label>
+        <label class="toggle">
+          <input type="checkbox" id="notifToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-row">
+        <label>Debug mode</label>
+        <label class="toggle">
+          <input type="checkbox" id="debugToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <hr>
+      <button class="btn btn-danger" id="resetBtn">Reset tout</button>
+    </div>
+  </div>
+
+  <!-- Thematic Modal -->
+  <div class="modal-overlay" id="thematicModal">
+    <div class="modal">
+      <h2 id="modalTitle">Nouvelle thématique</h2>
+      <div class="form-group">
+        <label>Nom</label>
+        <input type="text" id="thematicName" placeholder="Ex: Guide IA Automation">
+      </div>
+      <div class="form-group">
+        <label>Mots-clés (séparés par des virgules)</label>
+        <input type="text" id="thematicKeywords" placeholder="Ex: GUIDE, PDF, INFO">
+      </div>
+      <div class="form-group">
+        <label>Réponse au commentaire</label>
+        <textarea id="thematicReply" rows="2" placeholder="C'est envoyé en DM ! 🚀">C'est envoyé en DM ! 🚀</textarea>
+      </div>
+      <div class="form-group">
+        <label>Message DM</label>
+        <textarea id="thematicDM" rows="4" placeholder="Salut {{firstName}} ! Voici le document : {{link}}">Salut {{firstName}} ! Suite à ton commentaire, voici le document : {{link}}
+
+Bonne lecture ! 📖</textarea>
+      </div>
+      <div class="form-group">
+        <label>Lien lead magnet</label>
+        <input type="url" id="thematicLink" placeholder="https://docs.scale-me.fr/...">
+      </div>
+      <div class="form-group">
+        <label>Post URNs (optionnel, 1 par ligne)</label>
+        <textarea id="thematicPostUrns" rows="2" placeholder="Vide = tous les posts"></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="modalCancel">Annuler</button>
+        <button class="btn btn-primary" id="modalSave">Sauvegarder</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

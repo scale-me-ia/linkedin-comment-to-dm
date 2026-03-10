@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "Scale Me — LinkedIn Comment-to-DM",
+  "version": "1.0.0",
+  "description": "Auto-reply to LinkedIn comments with keyword triggers and send lead magnets via DM",
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://www.linkedin.com/*"
+  ],
+  "background": {
+    "service_worker": "src/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.linkedin.com/feed*",
+        "https://www.linkedin.com/posts/*",
+        "https://www.linkedin.com/in/*/recent-activity/*"
+      ],
+      "js": ["src/content-script.js"],
+      "css": ["src/content-style.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
