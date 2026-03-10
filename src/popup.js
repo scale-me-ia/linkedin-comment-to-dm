@@ -35,8 +35,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('debugToggle').addEventListener('change', onSettingChange);
   document.getElementById('dynamicMsgToggle').addEventListener('change', onSettingChange);
   document.getElementById('resetBtn').addEventListener('click', resetAll);
-  document.getElementById('catchupFetchPostsBtn').addEventListener('click', catchupFetchPosts);
-  document.getElementById('catchupRunBtn').addEventListener('click', catchupRun);
+  
+  // Catchup (null-safe in case elements don't exist)
+  const catchupFetchBtn = document.getElementById('catchupFetchPostsBtn');
+  const catchupRunBtnEl = document.getElementById('catchupRunBtn');
+  if (catchupFetchBtn) catchupFetchBtn.addEventListener('click', catchupFetchPosts);
+  if (catchupRunBtnEl) catchupRunBtnEl.addEventListener('click', catchupRun);
 
   // Tabs
   document.querySelectorAll('.tab').forEach(tab => {
@@ -102,6 +106,8 @@ async function pollStatus() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab && tab.url?.includes('linkedin.com')) {
       chrome.tabs.sendMessage(tab.id, { type: 'GET_STATUS' }, (response) => {
+        // Suppress "Receiving end does not exist" error
+        if (chrome.runtime.lastError) return;
         if (response) {
           document.getElementById('repliesCount').textContent = response.dailyCounters?.replies || 0;
           document.getElementById('dmsCount').textContent = response.dailyCounters?.dms || 0;
