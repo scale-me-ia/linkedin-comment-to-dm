@@ -657,17 +657,32 @@
   const linkedInAPI = new (window.ScaleMeLinkedInAPI || class { async getMyPosts() { return []; } async getAllComments() { return []; } })();
 
   /**
-   * Fetch user's recent posts via Voyager API
+   * Fetch user's recent posts — API first, DOM fallback
    */
   async function catchupFetchPosts() {
+    // Strategy 1: Try Voyager API
     try {
       const posts = await linkedInAPI.getMyPosts(20);
-      log('info', `📡 API: fetched ${posts.length} posts`);
-      return posts;
+      if (posts.length > 0) {
+        log('info', `📡 API: fetched ${posts.length} posts`);
+        return posts;
+      }
     } catch (err) {
-      log('error', 'API fetch posts error:', err);
-      throw err;
+      log('warn', 'API fetch posts failed, falling back to DOM scan:', err.message);
     }
+
+    // Strategy 2: DOM scan fallback (works on profile activity pages)
+    log('info', '📋 Falling back to DOM post scanner...');
+    const domPosts = scanProfilePosts();
+    if (domPosts.length > 0) {
+      return domPosts.map(p => ({
+        urn: p.urn,
+        text: p.text,
+        numComments: 0, // Unknown from DOM
+      }));
+    }
+
+    throw new Error('Aucun post trouvé. Essaie depuis ton profil LinkedIn > Activité > Posts');
   }
 
   /**
