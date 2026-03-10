@@ -8,11 +8,13 @@
 (async function ScaleMeLinkedIn() {
   'use strict';
 
-  // ── Config (inline from config.js) ───────────────────────
+  // ── Config ───────────────────────────────────────────────
   const SELECTORS = {
     FEED_CONTAINER: '.scaffold-finite-scroll__content',
     POST_CONTAINER: '.feed-shared-update-v2',
     POST_URN: 'data-urn',
+    POST_TEXT: '.feed-shared-update-v2__description .update-components-text',
+    POST_AUTHOR: '.update-components-actor__name',
     COMMENTS_SECTION: '.comments-comments-list',
     COMMENT_ITEM: '.comments-comment-item',
     COMMENT_ENTITY: '.comments-comment-entity',
@@ -31,14 +33,6 @@
     MSG_CLOSE_BTN: '.msg-overlay-bubble-header__control--close-btn',
   };
 
-  const DELAYS = {
-    BETWEEN_ACTIONS: { min: 30000, max: 120000 },
-    TYPING_CHAR: { min: 30, max: 80 },
-    BEFORE_SEND: { min: 2000, max: 5000 },
-    BEFORE_DM: { min: 10000, max: 60000 },
-    COMMENT_SCAN_INTERVAL: { min: 30000, max: 60000 },
-  };
-
   const LIMITS = {
     MAX_REPLIES_PER_DAY: 25,
     MAX_DMS_PER_DAY: 20,
@@ -52,6 +46,46 @@
     DAILY_COUNTERS: 'scaleme_daily_counters',
   };
 
+  // ── Dynamic Message Variations ───────────────────────────
+  // When "dynamicMessages" is ON, the base template is randomly varied
+  const REPLY_VARIATIONS = [
+    "C'est envoyé en DM ! 🚀",
+    "Envoyé en message privé ✅",
+    "C'est parti en DM 📩",
+    "Je t'envoie ça en privé ! 🎯",
+    "Check tes DMs ! 📬",
+    "Message privé envoyé 👍",
+    "C'est dans ta boîte de messages ! ✉️",
+    "Hop, envoyé en DM ⚡",
+    "Je te fais passer ça en privé 🤝",
+  ];
+
+  const DM_OPENERS = [
+    "Salut {{firstName}} !",
+    "Hey {{firstName}} 👋",
+    "Hello {{firstName}} !",
+    "{{firstName}}, voilà !",
+    "Salut {{firstName}} 🙂",
+  ];
+
+  const DM_BODIES = [
+    "Suite à ton commentaire, voici le contenu : {{link}}",
+    "Comme promis, voici le document : {{link}}",
+    "Voilà le lien vers le contenu : {{link}}",
+    "Tu trouveras tout ici : {{link}}",
+    "Comme demandé, le voici : {{link}}",
+    "Le contenu est dispo ici : {{link}}",
+  ];
+
+  const DM_CLOSERS = [
+    "Bonne lecture ! 📖",
+    "Hésite pas si t'as des questions 💬",
+    "Dis-moi ce que t'en penses !",
+    "Bonne lecture, et hésite pas à revenir vers moi 🤝",
+    "J'espère que ça t'aidera ! 🚀",
+    "Enjoy ! ⚡",
+  ];
+
   // ── Utilities ────────────────────────────────────────────
 
   function randomDelay(range) {
@@ -59,8 +93,17 @@
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 
+  function randomDelaySeconds(minSec, maxSec) {
+    const ms = Math.floor(Math.random() * ((maxSec - minSec) * 1000 + 1)) + minSec * 1000;
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  function pick(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
   }
 
   function extractFirstName(fullName) {
@@ -75,6 +118,25 @@
       .replace(/\{\{link\}\}/g, vars.link || '')
       .replace(/\{\{keyword\}\}/g, vars.keyword || '')
       .replace(/\{\{thematic\}\}/g, vars.thematic || '');
+  }
+
+  /**
+   * Generate a dynamic reply (varied each time)
+   */
+  function generateDynamicReply(baseTemplate, vars) {
+    if (!settings.dynamicMessages) return fillTemplate(baseTemplate, vars);
+    return fillTemplate(pick(REPLY_VARIATIONS), vars);
+  }
+
+  /**
+   * Generate a dynamic DM (varied each time but coherent)
+   */
+  function generateDynamicDM(baseTemplate, vars) {
+    if (!settings.dynamicMessages) return fillTemplate(baseTemplate, vars);
+    const opener = fillTemplate(pick(DM_OPENERS), vars);
+    const body = fillTemplate(pick(DM_BODIES), vars);
+    const closer = fillTemplate(pick(DM_CLOSERS), vars);
+    return `${opener}\n\n${body}\n\n${closer}`;
   }
 
   async function simulateTyping(element, text, charDelay = { min: 30, max: 80 }) {
@@ -136,7 +198,7 @@
 
   // ── State ────────────────────────────────────────────────
 
-  let settings = { enabled: false, dryRun: false, notificationsEnabled: true, debugMode: false };
+  let settings = { enabled: false, dryRun: false, notificationsEnabled: true, debugMode: false, dynamicMessages: false };
   let thematics = [];
   let processedComments = new Set();
   let dailyCounters = { replies: 0, dms: 0, date: getTodayKey() };
@@ -150,7 +212,6 @@
   async function init() {
     log('info', '⚡ Scale Me LinkedIn extension loaded');
 
-    // Load config from storage
     const data = await chrome.storage.local.get([
       STORAGE_KEYS.SETTINGS,
       STORAGE_KEYS.THEMATICS,
@@ -169,7 +230,7 @@
       dailyCounters = savedCounters;
     }
 
-    log('info', `Config: ${thematics.length} thematics, ${processedComments.size} processed, enabled=${settings.enabled}`);
+    log('info', `Config: ${thematics.length} thematics, ${processedComments.size} processed, enabled=${settings.enabled}, dynamic=${settings.dynamicMessages}`);
 
     if (settings.enabled) {
       startScanning();
@@ -201,11 +262,39 @@
           isProcessing: isProcessingQueue,
         });
       }
-      return true; // async
+      if (msg.type === 'SCAN_PROFILE_POSTS') {
+        const posts = scanProfilePosts();
+        sendResponse({ posts });
+      }
+      return true;
     });
 
-    // Inject status badge
     injectStatusBadge();
+  }
+
+  // ── Profile Post Scanner ─────────────────────────────────
+
+  function scanProfilePosts() {
+    const posts = [];
+    const postElements = document.querySelectorAll(SELECTORS.POST_CONTAINER);
+    
+    for (const postEl of postElements) {
+      const urn = postEl.getAttribute(SELECTORS.POST_URN) || '';
+      const textEl = postEl.querySelector(SELECTORS.POST_TEXT) || 
+                     postEl.querySelector('.update-components-text');
+      const authorEl = postEl.querySelector(SELECTORS.POST_AUTHOR);
+      
+      if (textEl) {
+        posts.push({
+          urn,
+          text: textEl.textContent.trim(),
+          author: authorEl ? authorEl.textContent.trim() : '',
+        });
+      }
+    }
+    
+    log('info', `📋 Scanned ${posts.length} posts from current page`);
+    return posts;
   }
 
   // ── Scanning ─────────────────────────────────────────────
@@ -245,13 +334,14 @@
   }
 
   function startPeriodicScan() {
+    const SCAN_INTERVAL = { min: 30000, max: 60000 };
     const doScan = async () => {
       if (!settings.enabled) return;
-      await randomDelay(DELAYS.COMMENT_SCAN_INTERVAL);
+      await randomDelay(SCAN_INTERVAL);
       scanAllVisibleComments();
       scanTimeout = setTimeout(doScan, 0);
     };
-    scanTimeout = setTimeout(doScan, DELAYS.COMMENT_SCAN_INTERVAL.min);
+    scanTimeout = setTimeout(doScan, SCAN_INTERVAL.min);
   }
 
   function scanAllVisibleComments() {
@@ -306,6 +396,7 @@
       return;
     }
     actionQueue.push(matchData);
+    log('info', `📋 Queued: ${matchData.authorName} (${actionQueue.length} in queue)`);
     if (!isProcessingQueue) processQueue();
   }
 
@@ -320,7 +411,14 @@
       } catch (err) {
         log('error', `Process error for ${match.authorName}:`, err);
       }
-      if (actionQueue.length > 0) await randomDelay(DELAYS.BETWEEN_ACTIONS);
+      // Between-action delay: use thematic config or default 2-5 min
+      if (actionQueue.length > 0) {
+        const nextMatch = actionQueue[0];
+        const minDelay = (nextMatch.thematic.replyDelayMin || 120) * 1000;
+        const maxDelay = (nextMatch.thematic.replyDelayMax || 300) * 1000;
+        log('debug', `Waiting ${Math.round(minDelay/1000)}-${Math.round(maxDelay/1000)}s before next action...`);
+        await randomDelay({ min: minDelay, max: maxDelay });
+      }
     }
 
     isProcessingQueue = false;
@@ -336,8 +434,14 @@
       thematic: match.thematic.name,
     };
 
-    // Step 1: Reply to comment
-    const replyText = fillTemplate(match.thematic.replyTemplate, vars);
+    // ── Step 1: Wait before reply (configurable delay) ──
+    const replyDelayMin = (match.thematic.replyDelayMin || 120) * 1000;
+    const replyDelayMax = (match.thematic.replyDelayMax || 300) * 1000;
+    log('info', `⏳ Waiting ${Math.round(replyDelayMin/1000)}-${Math.round(replyDelayMax/1000)}s before replying to ${match.authorName}...`);
+    await randomDelay({ min: replyDelayMin, max: replyDelayMax });
+
+    // ── Step 2: Reply to comment ──
+    const replyText = generateDynamicReply(match.thematic.replyTemplate, vars);
     if (settings.dryRun) {
       log('info', `🏜️ [DRY] Reply → ${match.authorName}: "${replyText}"`);
     } else {
@@ -352,10 +456,14 @@
       }
     }
 
-    // Step 2: Wait then DM
-    await randomDelay(DELAYS.BEFORE_DM);
-    const dmText = fillTemplate(match.thematic.dmTemplate, vars);
-    
+    // ── Step 3: Wait before DM (configurable delay) ──
+    const dmDelayMin = (match.thematic.dmDelayMin || 180) * 1000;
+    const dmDelayMax = (match.thematic.dmDelayMax || 600) * 1000;
+    log('info', `⏳ Waiting ${Math.round(dmDelayMin/1000)}-${Math.round(dmDelayMax/1000)}s before DM to ${match.authorName}...`);
+    await randomDelay({ min: dmDelayMin, max: dmDelayMax });
+
+    // ── Step 4: Send DM ──
+    const dmText = generateDynamicDM(match.thematic.dmTemplate, vars);
     if (settings.dryRun) {
       log('info', `🏜️ [DRY] DM → ${match.authorName}: "${dmText}"`);
     } else {
@@ -388,7 +496,6 @@
       await simulateClick(replyBtn);
       await sleep(1500);
 
-      // Find reply input (try within comment context, then fallback to last input on page)
       let input = await waitForElement(SELECTORS.COMMENT_INPUT, 5000, commentEl.closest(SELECTORS.COMMENT_ENTITY) || commentEl.parentElement);
       if (!input) {
         const inputs = document.querySelectorAll(SELECTORS.COMMENT_INPUT);
@@ -396,8 +503,8 @@
       }
       if (!input) { log('warn', 'No reply input'); return false; }
 
-      await simulateTyping(input, text, DELAYS.TYPING_CHAR);
-      await randomDelay(DELAYS.BEFORE_SEND);
+      await simulateTyping(input, text, { min: 30, max: 80 });
+      await randomDelay({ min: 2000, max: 5000 });
 
       const submit = await waitForElement(SELECTORS.COMMENT_SUBMIT_BTN, 3000);
       if (!submit) { log('warn', 'No submit btn'); return false; }
@@ -415,7 +522,6 @@
 
   async function sendDM(recipientName, text) {
     try {
-      // Open compose
       let composeBtn = document.querySelector(SELECTORS.MSG_COMPOSE_BTN);
       if (!composeBtn) {
         const msgIcon = document.querySelector('#messaging-tab-icon, .msg-overlay-list-bubble__btn');
@@ -426,13 +532,11 @@
       await simulateClick(composeBtn);
       await sleep(2000);
 
-      // Search recipient
       const searchInput = await waitForElement(SELECTORS.MSG_SEARCH_INPUT, 5000);
       if (!searchInput) { log('warn', 'No search input'); return false; }
-      await simulateTyping(searchInput, recipientName, DELAYS.TYPING_CHAR);
+      await simulateTyping(searchInput, recipientName, { min: 30, max: 80 });
       await sleep(2000);
 
-      // Select first result
       const result = await waitForElement(SELECTORS.MSG_RECIPIENT_RESULT, 5000);
       if (!result) {
         log('warn', `No result for "${recipientName}"`);
@@ -443,19 +547,16 @@
       await simulateClick(result);
       await sleep(1500);
 
-      // Type message
       const msgInput = await waitForElement(SELECTORS.MSG_BODY_INPUT, 5000);
       if (!msgInput) { log('warn', 'No msg input'); return false; }
-      await simulateTyping(msgInput, text, DELAYS.TYPING_CHAR);
-      await randomDelay(DELAYS.BEFORE_SEND);
+      await simulateTyping(msgInput, text, { min: 30, max: 80 });
+      await randomDelay({ min: 2000, max: 5000 });
 
-      // Send
       const sendBtn = await waitForElement(SELECTORS.MSG_SEND_BTN, 3000);
       if (!sendBtn) { log('warn', 'No send btn'); return false; }
       await simulateClick(sendBtn);
       await sleep(2000);
 
-      // Close convo
       const closeBtn = document.querySelector(SELECTORS.MSG_CLOSE_BTN);
       if (closeBtn) { await sleep(1000); await simulateClick(closeBtn); }
 
@@ -490,7 +591,7 @@
     await chrome.storage.local.set({ [STORAGE_KEYS.ACTION_LOG]: logs });
   }
 
-  // ── Status Badge (floating indicator) ────────────────────
+  // ── Status Badge ─────────────────────────────────────────
 
   function injectStatusBadge() {
     const badge = document.createElement('div');

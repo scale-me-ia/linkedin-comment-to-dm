@@ -55,6 +55,9 @@
 
     <!-- Thematics Tab -->
     <div class="tab-content active" id="tab-thematics">
+      <div class="scan-bar">
+        <button class="btn btn-scan" id="scanProfileBtn">🔍 Scanner mon profil</button>
+      </div>
       <div id="thematicsList"></div>
       <button class="btn btn-primary" id="addThematicBtn">+ Ajouter une thématique</button>
     </div>
@@ -74,6 +77,14 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
+      <div class="setting-row">
+        <label>Messages dynamiques 🤖</label>
+        <label class="toggle">
+          <input type="checkbox" id="dynamicMsgToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-hint">Quand activé, les réponses et DMs sont reformulés à chaque envoi pour varier le texte naturellement.</div>
       <div class="setting-row">
         <label>Notifications</label>
         <label class="toggle">
@@ -106,19 +117,45 @@
         <input type="text" id="thematicKeywords" placeholder="Ex: GUIDE, PDF, INFO">
       </div>
       <div class="form-group">
-        <label>Réponse au commentaire</label>
+        <label>Template réponse commentaire</label>
         <textarea id="thematicReply" rows="2" placeholder="C'est envoyé en DM ! 🚀">C'est envoyé en DM ! 🚀</textarea>
+        <div class="form-hint">Variables : {{firstName}}, {{fullName}}, {{keyword}}, {{thematic}}</div>
       </div>
       <div class="form-group">
-        <label>Message DM</label>
+        <label>Template message DM</label>
         <textarea id="thematicDM" rows="4" placeholder="Salut {{firstName}} ! Voici le document : {{link}}">Salut {{firstName}} ! Suite à ton commentaire, voici le document : {{link}}
 
 Bonne lecture ! 📖</textarea>
+        <div class="form-hint">Variables : {{firstName}}, {{fullName}}, {{link}}, {{keyword}}</div>
       </div>
       <div class="form-group">
         <label>Lien lead magnet</label>
         <input type="url" id="thematicLink" placeholder="https://docs.scale-me.fr/...">
       </div>
+
+      <div class="form-section-title">⏱️ Délais (secondes)</div>
+      <div class="form-row-2col">
+        <div class="form-group">
+          <label>Réponse min</label>
+          <input type="number" id="replyDelayMin" value="120" min="30" step="30">
+        </div>
+        <div class="form-group">
+          <label>Réponse max</label>
+          <input type="number" id="replyDelayMax" value="300" min="60" step="30">
+        </div>
+      </div>
+      <div class="form-row-2col">
+        <div class="form-group">
+          <label>DM min</label>
+          <input type="number" id="dmDelayMin" value="180" min="60" step="30">
+        </div>
+        <div class="form-group">
+          <label>DM max</label>
+          <input type="number" id="dmDelayMax" value="600" min="120" step="30">
+        </div>
+      </div>
+      <div class="form-hint">Défaut : réponse 2-5 min, DM 3-10 min après le commentaire</div>
+
       <div class="form-group">
         <label>Post URNs (optionnel, 1 par ligne)</label>
         <textarea id="thematicPostUrns" rows="2" placeholder="Vide = tous les posts"></textarea>
