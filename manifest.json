@@ -6,8 +6,7 @@
   "permissions": [
     "storage",
     "alarms",
-    "notifications",
-    "cookies"
+    "notifications"
   ],
   "host_permissions": [
     "https://www.linkedin.com/*"
