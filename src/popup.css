@@ -126,7 +126,7 @@ body {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  grid-template-columns: repeat(4, 1fr);
   gap: 8px;
   margin-bottom: 16px;
 }
@@ -263,6 +263,52 @@ body {
   color: #666;
   margin-top: 4px;
   word-break: break-all;
+}
+
+/* ── Pipeline ────────────────────────────────────────────── */
+
+.pipeline-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.pipeline-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.pipeline-author {
+  color: #FFD700;
+  font-weight: 500;
+  flex-shrink: 0;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pipeline-keyword {
+  color: #00ff88;
+  flex-shrink: 0;
+  font-size: 10px;
+}
+
+.pipeline-step {
+  margin-left: auto;
+  color: #aaa;
+  white-space: nowrap;
+}
+
+.pipeline-timer {
+  color: #FFD700;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ── Logs ────────────────────────────────────────────────── */
@@ -603,4 +649,43 @@ hr {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+/* ── Selector Diagnostic ─────────────────────────────────── */
+
+.setting-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaa;
+  margin: 12px 0 6px;
+}
+
+.selector-health {
+  font-size: 11px;
+  padding: 6px 0;
+  line-height: 1.4;
+}
+
+.diagnostic-buttons {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.diagnostic-buttons .btn {
+  flex: 1;
+  font-size: 11px;
+}
+
+.diagnostic-result {
+  font-size: 11px;
+  padding: 4px 0;
+  line-height: 1.4;
+}
+
+.diagnostic-result code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 10px;
 }

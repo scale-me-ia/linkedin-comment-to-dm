@@ -13,6 +13,22 @@ const STORAGE_KEYS = {
 let thematics = [];
 let settings = {};
 let editingIndex = -1;
+let pipelineInterval = null;
+
+const STEP_DISPLAY = {
+  queued:          { icon: '📋', label: 'En file' },
+  wait_reply:      { icon: '⏳', label: 'Réponse dans' },
+  replying:        { icon: '💬', label: 'Réponse...' },
+  reply_done:      { icon: '✅', label: 'Réponse OK' },
+  reply_failed:    { icon: '❌', label: 'Réponse échouée' },
+  wait_dm:         { icon: '⏳', label: 'DM dans' },
+  sending_dm:      { icon: '📩', label: 'DM...' },
+  dm_done:         { icon: '✅', label: 'DM envoyé' },
+  connection_sent: { icon: '🤝', label: 'Connexion envoyée' },
+  pending_dm:      { icon: '⏳', label: 'DM en attente' },
+  done:            { icon: '✅', label: 'Terminé' },
+  failed:          { icon: '❌', label: 'Erreur' },
+};
 
 // ── Init ───────────────────────────────────────────────────
 
@@ -28,19 +44,31 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('addThematicBtn').addEventListener('click', () => openModal());
   document.getElementById('scanProfileBtn').addEventListener('click', scanProfile);
   document.getElementById('modalCancel').addEventListener('click', closeModal);
+  // Close modal on overlay click (outside modal content)
+  document.getElementById('thematicModal').addEventListener('click', (e) => {
+    if (e.target.id === 'thematicModal') closeModal();
+  });
   document.getElementById('modalSave').addEventListener('click', saveThematic);
   document.getElementById('clearLogsBtn').addEventListener('click', clearLogs);
   document.getElementById('dryRunToggle').addEventListener('change', onSettingChange);
   document.getElementById('notifToggle').addEventListener('change', onSettingChange);
   document.getElementById('debugToggle').addEventListener('change', onSettingChange);
   document.getElementById('dynamicMsgToggle').addEventListener('change', onSettingChange);
+  document.getElementById('autoCatchupToggle').addEventListener('change', onSettingChange);
+  ['globalReplyDelayMin','globalReplyDelayMax','globalDmDelayMin','globalDmDelayMax','globalBetweenMin','globalBetweenMax']
+    .forEach(id => document.getElementById(id).addEventListener('change', onSettingChange));
   document.getElementById('resetBtn').addEventListener('click', resetAll);
+  document.getElementById('diagnosticBtn').addEventListener('click', runDiagnostic);
+  document.getElementById('discoveryBtn').addEventListener('click', runDiscovery);
+  loadSelectorHealth();
   
   // Catchup (null-safe in case elements don't exist)
   const catchupFetchBtn = document.getElementById('catchupFetchPostsBtn');
   const catchupRunBtnEl = document.getElementById('catchupRunBtn');
   if (catchupFetchBtn) catchupFetchBtn.addEventListener('click', catchupFetchPosts);
   if (catchupRunBtnEl) catchupRunBtnEl.addEventListener('click', catchupRun);
+  const clearProcessedBtn = document.getElementById('clearProcessedBtn');
+  if (clearProcessedBtn) clearProcessedBtn.addEventListener('click', clearProcessedComments);
 
   // Tabs
   document.querySelectorAll('.tab').forEach(tab => {
@@ -88,6 +116,15 @@ function updateUI() {
   document.getElementById('notifToggle').checked = settings.notificationsEnabled;
   document.getElementById('debugToggle').checked = settings.debugMode;
   document.getElementById('dynamicMsgToggle').checked = settings.dynamicMessages || false;
+  document.getElementById('autoCatchupToggle').checked = settings.autoCatchup || false;
+
+  // Global delay settings
+  document.getElementById('globalReplyDelayMin').value = settings.replyDelayMin || 30;
+  document.getElementById('globalReplyDelayMax').value = settings.replyDelayMax || 90;
+  document.getElementById('globalDmDelayMin').value = settings.dmDelayMin || 60;
+  document.getElementById('globalDmDelayMax').value = settings.dmDelayMax || 180;
+  document.getElementById('globalBetweenMin').value = settings.betweenActionsMin || 15;
+  document.getElementById('globalBetweenMax').value = settings.betweenActionsMax || 60;
 
   const dot = document.getElementById('statusDot');
   const text = document.getElementById('statusText');
@@ -112,15 +149,53 @@ async function pollStatus() {
           document.getElementById('repliesCount').textContent = response.dailyCounters?.replies || 0;
           document.getElementById('dmsCount').textContent = response.dailyCounters?.dms || 0;
           document.getElementById('queueCount').textContent = response.queueLength || 0;
+          document.getElementById('pendingCount').textContent = response.pendingDMsCount || 0;
+          renderPipeline(response.commentSteps);
         }
       });
     } else {
-      const data = await chrome.storage.local.get(STORAGE_KEYS.DAILY_COUNTERS);
+      const data = await chrome.storage.local.get([STORAGE_KEYS.DAILY_COUNTERS, 'scaleme_pending_dms', 'scaleme_action_queue', 'scaleme_comment_steps']);
       const counters = data[STORAGE_KEYS.DAILY_COUNTERS] || {};
       document.getElementById('repliesCount').textContent = counters.replies || 0;
       document.getElementById('dmsCount').textContent = counters.dms || 0;
+      document.getElementById('queueCount').textContent = (data.scaleme_action_queue || []).length;
+      document.getElementById('pendingCount').textContent = (data.scaleme_pending_dms || []).length;
+      renderPipeline(data.scaleme_comment_steps || null);
     }
   } catch (e) {}
+}
+
+function renderPipeline(steps) {
+  const list = document.getElementById('pipelineList');
+  const empty = document.getElementById('pipelineEmpty');
+  if (!list || !empty) return;
+
+  const entries = Object.entries(steps || {});
+
+  if (entries.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = 'block';
+    return;
+  }
+  empty.style.display = 'none';
+
+  list.innerHTML = entries.map(([id, s]) => {
+    const display = STEP_DISPLAY[s.step] || { icon: '⚡', label: s.step };
+    let timer = '';
+    if (s.timerTargetAt && s.timerTargetAt > Date.now()) {
+      const rem = Math.ceil((s.timerTargetAt - Date.now()) / 1000);
+      const min = Math.floor(rem / 60);
+      const sec = rem % 60;
+      timer = ` <span class="pipeline-timer">${min}:${String(sec).padStart(2, '0')}</span>`;
+    }
+    return `
+      <div class="pipeline-item">
+        <div class="pipeline-author">${escapeHtml(s.authorName || '')}</div>
+        <div class="pipeline-keyword">"${escapeHtml(s.matchedKeyword || '')}"</div>
+        <div class="pipeline-step">${display.icon} ${display.label}${timer}</div>
+      </div>
+    `;
+  }).join('');
 }
 
 // ── Toggle Enabled ─────────────────────────────────────────
@@ -144,7 +219,16 @@ async function onSettingChange() {
   settings.notificationsEnabled = document.getElementById('notifToggle').checked;
   settings.debugMode = document.getElementById('debugToggle').checked;
   settings.dynamicMessages = document.getElementById('dynamicMsgToggle').checked;
-  
+  settings.autoCatchup = document.getElementById('autoCatchupToggle').checked;
+
+  // Global delay settings
+  settings.replyDelayMin = parseInt(document.getElementById('globalReplyDelayMin').value) || 30;
+  settings.replyDelayMax = parseInt(document.getElementById('globalReplyDelayMax').value) || 90;
+  settings.dmDelayMin = parseInt(document.getElementById('globalDmDelayMin').value) || 60;
+  settings.dmDelayMax = parseInt(document.getElementById('globalDmDelayMax').value) || 180;
+  settings.betweenActionsMin = parseInt(document.getElementById('globalBetweenMin').value) || 15;
+  settings.betweenActionsMax = parseInt(document.getElementById('globalBetweenMax').value) || 60;
+
   await chrome.storage.local.set({ [STORAGE_KEYS.SETTINGS]: settings });
   updateUI();
   try {
@@ -163,6 +247,16 @@ function switchTab(tabName) {
   document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
   document.getElementById(`tab-${tabName}`).classList.add('active');
   if (tabName === 'logs') renderLogs();
+
+  // Pipeline tab: poll every second for live timer updates
+  if (pipelineInterval) {
+    clearInterval(pipelineInterval);
+    pipelineInterval = null;
+  }
+  if (tabName === 'pipeline') {
+    pollStatus();
+    pipelineInterval = setInterval(pollStatus, 1000);
+  }
 }
 
 // ── Thematics Rendering (CSP-safe, no inline onclick) ──────
@@ -198,9 +292,9 @@ function renderThematics() {
 }
 
 function estimateDelay(thematic) {
-  // Show the configured reply delay range
-  const min = Math.round((thematic.replyDelayMin || 120) / 60);
-  const max = Math.round((thematic.replyDelayMax || 300) / 60);
+  // Show the configured reply delay range (thematic overrides global)
+  const min = Math.round((thematic.replyDelayMin || settings.replyDelayMin || 30) / 60);
+  const max = Math.round((thematic.replyDelayMax || settings.replyDelayMax || 90) / 60);
   return `${min}-${max} min`;
 }
 
@@ -345,10 +439,10 @@ function generateDraftsFromPosts(posts) {
         postUrns: post.urn ? [post.urn] : [],
         enabled: false, // Draft = disabled by default
         isDraft: true,
-        replyDelayMin: 120,  // 2 min
-        replyDelayMax: 300,  // 5 min
-        dmDelayMin: 180,     // 3 min
-        dmDelayMax: 600,     // 10 min
+        replyDelayMin: 0,  // 0 = use global setting
+        replyDelayMax: 0,
+        dmDelayMin: 0,
+        dmDelayMax: 0,
       });
     }
   }
@@ -371,10 +465,10 @@ function openModal(index = -1) {
     document.getElementById('thematicDM').value = t.dmTemplate || '';
     document.getElementById('thematicLink').value = t.leadMagnetUrl || '';
     document.getElementById('thematicPostUrns').value = (t.postUrns || []).join('\n');
-    document.getElementById('replyDelayMin').value = t.replyDelayMin || 120;
-    document.getElementById('replyDelayMax').value = t.replyDelayMax || 300;
-    document.getElementById('dmDelayMin').value = t.dmDelayMin || 180;
-    document.getElementById('dmDelayMax').value = t.dmDelayMax || 600;
+    document.getElementById('replyDelayMin').value = t.replyDelayMin || 0;
+    document.getElementById('replyDelayMax').value = t.replyDelayMax || 0;
+    document.getElementById('dmDelayMin').value = t.dmDelayMin || 0;
+    document.getElementById('dmDelayMax').value = t.dmDelayMax || 0;
   } else {
     document.getElementById('modalTitle').textContent = 'Nouvelle thématique';
     document.getElementById('thematicName').value = '';
@@ -383,10 +477,10 @@ function openModal(index = -1) {
     document.getElementById('thematicDM').value = "Salut {{firstName}} ! Suite à ton commentaire, voici le document : {{link}}\n\nBonne lecture ! 📖";
     document.getElementById('thematicLink').value = '';
     document.getElementById('thematicPostUrns').value = '';
-    document.getElementById('replyDelayMin').value = 120;
-    document.getElementById('replyDelayMax').value = 300;
-    document.getElementById('dmDelayMin').value = 180;
-    document.getElementById('dmDelayMax').value = 600;
+    document.getElementById('replyDelayMin').value = 0;
+    document.getElementById('replyDelayMax').value = 0;
+    document.getElementById('dmDelayMin').value = 0;
+    document.getElementById('dmDelayMax').value = 0;
   }
 
   modal.classList.add('active');
@@ -414,10 +508,10 @@ async function saveThematic() {
       .filter(u => u.length > 0),
     enabled: editingIndex >= 0 ? thematics[editingIndex].enabled : true,
     isDraft: false,
-    replyDelayMin: parseInt(document.getElementById('replyDelayMin').value) || 120,
-    replyDelayMax: parseInt(document.getElementById('replyDelayMax').value) || 300,
-    dmDelayMin: parseInt(document.getElementById('dmDelayMin').value) || 180,
-    dmDelayMax: parseInt(document.getElementById('dmDelayMax').value) || 600,
+    replyDelayMin: parseInt(document.getElementById('replyDelayMin').value) || 0,
+    replyDelayMax: parseInt(document.getElementById('replyDelayMax').value) || 0,
+    dmDelayMin: parseInt(document.getElementById('dmDelayMin').value) || 0,
+    dmDelayMax: parseInt(document.getElementById('dmDelayMax').value) || 0,
   };
 
   if (!thematic.name || thematic.keywords.length === 0) {
@@ -441,6 +535,7 @@ async function saveThematic() {
 
 let catchupPosts = [];
 let selectedCatchupPostUrns = new Set();
+let catchupRunning = false;
 
 async function catchupFetchPosts() {
   const btn = document.getElementById('catchupFetchPostsBtn');
@@ -484,9 +579,12 @@ async function catchupFetchPosts() {
   }
 }
 
-function renderCatchupPosts() {
+function renderCatchupPosts(isNewFetch = true) {
   const list = document.getElementById('catchupPostsList');
-  selectedCatchupPostUrns = new Set(catchupPosts.map(p => p.urn)); // Select all by default
+  // Only reset selection on new fetch, preserve user selection on re-render
+  if (isNewFetch) {
+    selectedCatchupPostUrns = new Set(catchupPosts.map(p => p.urn));
+  }
 
   list.innerHTML = catchupPosts.map((p, i) => {
     const preview = (p.text || '').substring(0, 80).replace(/\n/g, ' ');
@@ -515,11 +613,13 @@ function renderCatchupPosts() {
 }
 
 async function catchupRun() {
+  if (catchupRunning) return;
   if (selectedCatchupPostUrns.size === 0) {
     alert('Sélectionne au moins un post !');
     return;
   }
 
+  catchupRunning = true;
   const btn = document.getElementById('catchupRunBtn');
   const status = document.getElementById('catchupStatus');
   btn.disabled = true;
@@ -532,6 +632,7 @@ async function catchupRun() {
       alert('Ouvrez LinkedIn dans l\'onglet actif.');
       btn.disabled = false;
       btn.textContent = '🚀 Lancer le rattrapage';
+      catchupRunning = false;
       return;
     }
 
@@ -541,17 +642,21 @@ async function catchupRun() {
     }, (response) => {
       btn.disabled = false;
       btn.textContent = '🚀 Lancer le rattrapage';
+      catchupRunning = false;
 
       if (chrome.runtime.lastError || response?.error) {
         status.innerHTML = `<span style="color:#ff4444">❌ ${escapeHtml(response?.error || chrome.runtime.lastError?.message || 'Erreur')}</span>`;
         return;
       }
 
-      const r = response;
+      const r = response || {};
       let statusHtml = `✅ <strong>Rattrapage terminé</strong><br>`;
-      statusHtml += `📋 ${r.postsScanned} posts scannés<br>`;
-      statusHtml += `💬 ${r.commentsScanned} commentaires analysés<br>`;
-      statusHtml += `🎯 ${r.matches} match(es) → DMs en attente<br>`;
+      statusHtml += `📋 ${r.postsScanned ?? 0} posts scannés<br>`;
+      statusHtml += `💬 ${r.commentsScanned ?? 0} commentaires analysés<br>`;
+      statusHtml += `🎯 ${r.matches ?? 0} nouveau(x) match(es) → DMs en attente<br>`;
+      if (r.alreadyProcessed > 0) {
+        statusHtml += `✅ ${r.alreadyProcessed} commentaire(s) déjà traité(s) par le scanner<br>`;
+      }
       if (r.errors?.length > 0) {
         statusHtml += `<br>⚠️ ${r.errors.length} erreur(s) :<br>`;
         r.errors.forEach(e => { statusHtml += `<span style="color:#ff9900;font-size:10px">${escapeHtml(e)}</span><br>`; });
@@ -561,7 +666,29 @@ async function catchupRun() {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = '🚀 Lancer le rattrapage';
+    catchupRunning = false;
     status.innerHTML = `<span style="color:#ff4444">❌ ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+// ── Clear Processed Comments ─────────────────────────────
+
+async function clearProcessedComments() {
+  if (!confirm('Effacer tous les commentaires traités ? Ils pourront être re-détectés au prochain scan.')) return;
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+    chrome.tabs.sendMessage(tab.id, { type: 'CLEAR_PROCESSED' }, (resp) => {
+      if (chrome.runtime.lastError) {
+        alert('Erreur : ' + (chrome.runtime.lastError.message || 'onglet non disponible'));
+        return;
+      }
+      if (resp?.ok) {
+        alert(`${resp.cleared} commentaire(s) effacé(s). Relancez le rattrapage.`);
+      }
+    });
+  } catch (e) {
+    alert('Erreur : ' + e.message);
   }
 }
 
@@ -579,7 +706,12 @@ async function renderLogs() {
 
   list.innerHTML = logs.slice(0, 100).map(l => {
     const time = new Date(l.ts).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-    const icon = l.action === 'reply_sent' ? '💬' : l.action === 'dm_sent' ? '📩' : l.action.includes('fail') ? '❌' : '⚡';
+    const icon = l.action === 'reply_sent' ? '💬'
+      : l.action === 'dm_sent' || l.action === 'catchup_dm_sent' ? '📩'
+      : l.action === 'connection_request_sent' ? '🤝'
+      : l.action === 'pending_dm_sent' ? '✅'
+      : l.action === 'pending_dm_expired' ? '⏰'
+      : l.action.includes('fail') ? '❌' : '⚡';
     return `
       <div class="log-item">
         <span class="log-time">${time}</span>
@@ -609,11 +741,145 @@ async function resetAll() {
     [STORAGE_KEYS.ACTION_LOG]: [],
     [STORAGE_KEYS.DAILY_COUNTERS]: { replies: 0, dms: 0, date: new Date().toISOString().split('T')[0] },
     scaleme_processed_comments: [],
+    scaleme_action_queue: [],
+    scaleme_comment_steps: {},
   });
   thematics = [];
   renderThematics();
   renderLogs();
   pollStatus();
+}
+
+// ── Selector Diagnostic ──────────────────────────────────
+
+async function loadSelectorHealth() {
+  const data = await chrome.storage.local.get('scaleme_selector_health');
+  const health = data.scaleme_selector_health;
+  const el = document.getElementById('selectorHealth');
+
+  if (!health) {
+    el.innerHTML = '<span style="color:#888">Aucun diagnostic effectué</span>';
+    return;
+  }
+
+  const age = Math.round((Date.now() - health.timestamp) / 60000);
+  if (health.broken && health.broken.length > 0) {
+    el.innerHTML = `<span style="color:#ff4444">❌ ${health.broken.length} sélecteur(s) cassé(s) : ${health.broken.join(', ')}</span><br><span style="color:#888;font-size:10px">Il y a ${age} min</span>`;
+  } else {
+    el.innerHTML = `<span style="color:#2ecc71">✅ Tous les sélecteurs OK</span><br><span style="color:#888;font-size:10px">Il y a ${age} min</span>`;
+  }
+}
+
+async function runDiagnostic() {
+  const btn = document.getElementById('diagnosticBtn');
+  const result = document.getElementById('diagnosticResult');
+  btn.disabled = true;
+  btn.textContent = '⏳ Diagnostic...';
+  result.textContent = '';
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url?.includes('linkedin.com')) {
+      result.innerHTML = '<span style="color:#ff9900">⚠️ Ouvrez LinkedIn pour lancer le diagnostic</span>';
+      btn.disabled = false;
+      btn.textContent = '🩺 Diagnostiquer les sélecteurs';
+      return;
+    }
+
+    chrome.tabs.sendMessage(tab.id, { type: 'RUN_DIAGNOSTIC' }, (response) => {
+      btn.disabled = false;
+      btn.textContent = '🩺 Diagnostiquer les sélecteurs';
+
+      if (chrome.runtime.lastError || !response) {
+        result.innerHTML = `<span style="color:#ff4444">❌ ${chrome.runtime.lastError?.message || 'Erreur'}</span>`;
+        return;
+      }
+
+      if (response.error) {
+        result.innerHTML = `<span style="color:#ff4444">❌ ${escapeHtml(response.error)}</span>`;
+        return;
+      }
+
+      let html = `<div style="margin-top:8px">`;
+      html += `<strong>✅ ${response.pass}</strong> OK — `;
+      html += `<strong style="color:#ff4444">❌ ${response.fail}</strong> cassés — `;
+      html += `<strong style="color:#f39c12">⚠️ ${response.warn}</strong> absents<br>`;
+      html += `<span style="color:#888;font-size:10px">Voir console F12 pour le rapport détaillé</span>`;
+      html += `</div>`;
+      result.innerHTML = html;
+
+      // Refresh health indicator
+      loadSelectorHealth();
+    });
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '🩺 Diagnostic';
+    result.innerHTML = `<span style="color:#ff4444">❌ ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+async function runDiscovery() {
+  const btn = document.getElementById('discoveryBtn');
+  const result = document.getElementById('diagnosticResult');
+  btn.disabled = true;
+  btn.textContent = '⏳ Discovery...';
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url?.includes('linkedin.com')) {
+      result.innerHTML = '<span style="color:#ff9900">⚠️ Ouvrez LinkedIn avec des commentaires visibles</span>';
+      btn.disabled = false;
+      btn.textContent = '🔬 Discovery DOM';
+      return;
+    }
+
+    chrome.tabs.sendMessage(tab.id, { type: 'DISCOVER_DOM' }, (response) => {
+      btn.disabled = false;
+      btn.textContent = '🔬 Discovery DOM';
+
+      if (chrome.runtime.lastError || !response) {
+        result.innerHTML = `<span style="color:#ff4444">❌ ${chrome.runtime.lastError?.message || 'Erreur'}</span>`;
+        return;
+      }
+
+      if (response.error) {
+        result.innerHTML = `<span style="color:#ff4444">❌ ${escapeHtml(response.error)}</span>`;
+        return;
+      }
+
+      if (response.comments === 0) {
+        result.innerHTML = '<span style="color:#ff9900">⚠️ Aucun commentaire trouvé sur cette page</span>';
+        return;
+      }
+
+      let html = `<div style="margin-top:8px">`;
+      html += `<strong style="color:#2ecc71">${response.commentCount}</strong> commentaires trouvés via <code>${escapeHtml(response.commentSelector)}</code><br>`;
+
+      if (response.authorCandidates?.length > 0) {
+        html += `<br><strong>Auteurs :</strong><br>`;
+        for (const c of response.authorCandidates.slice(0, 3)) {
+          html += `<span style="color:#3498db;font-size:10px">→ ${escapeHtml(c.selector)} "${escapeHtml(c.textPreview)}"</span><br>`;
+        }
+      } else {
+        html += `<span style="color:#ff4444">❌ Aucun sélecteur auteur trouvé</span><br>`;
+      }
+
+      if (response.textCandidates?.length > 0) {
+        html += `<br><strong>Texte :</strong><br>`;
+        for (const c of response.textCandidates.slice(0, 3)) {
+          html += `<span style="color:#3498db;font-size:10px">→ ${escapeHtml(c.selector)} "${escapeHtml(c.textPreview)}"</span><br>`;
+        }
+      }
+
+      html += `<br><span style="color:#888;font-size:10px">Rapport complet : console F12 (retirer le filtre [ScaleMe])</span>`;
+      html += `</div>`;
+      result.innerHTML = html;
+    });
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = '🔬 Discovery DOM';
+    result.innerHTML = `<span style="color:#ff4444">❌ ${escapeHtml(e.message)}</span>`;
+  }
 }
 
 // ── Helpers ────────────────────────────────────────────────

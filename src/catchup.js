@@ -6,23 +6,20 @@
 
 class LinkedInCatchup {
   constructor() {
+    // Use shared selectors (loaded from selectors.js via manifest)
+    const shared = window.ScaleMeSelectors || {};
     this.SELECTORS = {
-      // Post containers
-      POST_CONTAINER: '.feed-shared-update-v2, .profile-creator-shared-feed-update__container, [data-urn*="activity"], article',
-      POST_URN_ATTR: 'data-urn',
-      
-      // Comments
-      SHOW_COMMENTS_BTN: '.social-details-social-counts__comments, .social-details-social-counts__item--with-social-proof',
-      COMMENTS_SECTION: '.comments-comments-list',
-      COMMENT_ITEM: '.comments-comment-item, .comments-comment-entity',
-      COMMENT_TEXT: '.comments-comment-item__main-content .update-components-text, .feed-shared-main-content .update-components-text',
-      COMMENT_AUTHOR: '.comments-post-meta__name-text, .comment-item__inline-show-more-text',
-      COMMENT_AUTHOR_LINK: '.comments-post-meta__name-text a, .comments-post-meta__profile-link',
-      LOAD_MORE_COMMENTS: '.comments-comments-list__load-more-comments-button, button[aria-label*="comments"]',
-      SHOW_PREVIOUS: '.comments-comments-list__show-previous-button',
-      
-      // Post text
-      POST_TEXT: '.feed-shared-update-v2__description .update-components-text, .update-components-text, .break-words',
+      POST_CONTAINER: shared.POST_CONTAINER_ALL || '.feed-shared-update-v2',
+      POST_URN_ATTR: shared.POST_URN || 'data-urn',
+      SHOW_COMMENTS_BTN: shared.SHOW_COMMENTS_BTN || '.social-details-social-counts__comments',
+      COMMENTS_SECTION: shared.COMMENTS_SECTION || '.comments-comments-list',
+      COMMENT_ITEM: shared.COMMENT_ITEM_ALL || '.comments-comment-item',
+      COMMENT_TEXT: shared.COMMENT_TEXT_ALL || '.comments-comment-item__main-content .update-components-text',
+      COMMENT_AUTHOR: shared.COMMENT_AUTHOR_ALL || '.comments-post-meta__name-text',
+      COMMENT_AUTHOR_LINK: shared.COMMENT_AUTHOR_LINK_ALL || '.comments-post-meta__name-text a',
+      LOAD_MORE_COMMENTS: shared.LOAD_MORE_COMMENTS || '.comments-comments-list__load-more-comments-button',
+      SHOW_PREVIOUS: shared.SHOW_PREVIOUS || '.comments-comments-list__show-previous-button',
+      POST_TEXT: shared.POST_TEXT_ALL || '.feed-shared-update-v2__description .update-components-text',
     };
   }
 
@@ -50,6 +47,81 @@ class LinkedInCatchup {
     el.click();
     await this._sleep(1500);
     return true;
+  }
+
+  /**
+   * Extract author name from a comment element using multiple fallback strategies
+   * Returns { authorName, authorProfileUrl }
+   */
+  _extractAuthor(commentEl) {
+    let authorName = '';
+    let authorProfileUrl = '';
+
+    // Strategy 1: Primary selector
+    const authorEl = commentEl.querySelector(this.SELECTORS.COMMENT_AUTHOR);
+    if (authorEl) {
+      authorName = authorEl.textContent.trim();
+    }
+
+    // Strategy 2: Author link text
+    if (!authorName) {
+      const linkEl = commentEl.querySelector(this.SELECTORS.COMMENT_AUTHOR_LINK);
+      if (linkEl) {
+        authorName = linkEl.textContent.trim();
+        if (linkEl.href) authorProfileUrl = linkEl.href;
+      }
+    }
+
+    // Strategy 3: aria-label on profile links (e.g. "Voir le profil de Jean Dupont")
+    if (!authorName) {
+      const profileLink = commentEl.querySelector('a[href*="/in/"]');
+      if (profileLink) {
+        if (!authorProfileUrl && profileLink.href) authorProfileUrl = profileLink.href;
+        const aria = profileLink.getAttribute('aria-label') || '';
+        const ariaMatch = aria.match(/(?:profil\s+(?:de\s+)?|profile\s+(?:of\s+)?)(.+)/i);
+        if (ariaMatch) {
+          authorName = ariaMatch[1].trim();
+        } else if (profileLink.textContent.trim()) {
+          authorName = profileLink.textContent.trim();
+        }
+      }
+    }
+
+    // Strategy 4: Wildcard class patterns
+    if (!authorName) {
+      const wildcard = commentEl.querySelector('[class*="name-text"], [class*="actor__name"], [class*="comment-meta"] [class*="name"]');
+      if (wildcard) authorName = wildcard.textContent.trim();
+    }
+
+    // Strategy 5: Parse name from profile URL slug (/in/john-doe-123/ → John Doe)
+    if (!authorName && authorProfileUrl) {
+      authorName = this._nameFromProfileUrl(authorProfileUrl);
+    }
+
+    // Extract profile URL if still missing
+    if (!authorProfileUrl) {
+      const anyProfileLink = commentEl.querySelector('a[href*="/in/"]');
+      if (anyProfileLink) authorProfileUrl = anyProfileLink.href;
+    }
+
+    return {
+      authorName: authorName || 'Unknown',
+      authorProfileUrl: authorProfileUrl || '',
+    };
+  }
+
+  /**
+   * Parse a display name from a LinkedIn profile URL slug
+   * /in/jean-dupont-a1b2c3/ → Jean Dupont
+   */
+  _nameFromProfileUrl(url) {
+    const match = url.match(/\/in\/([^/?#]+)/);
+    if (!match) return '';
+    return match[1]
+      .replace(/-[a-f0-9]{4,}$/i, '') // remove trailing hash
+      .replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase())
+      .trim();
   }
 
   /**
@@ -149,15 +221,14 @@ class LinkedInCatchup {
     
     for (const commentEl of commentElements) {
       const textEl = commentEl.querySelector(this.SELECTORS.COMMENT_TEXT);
-      const authorEl = commentEl.querySelector(this.SELECTORS.COMMENT_AUTHOR);
-      const authorLinkEl = commentEl.querySelector(this.SELECTORS.COMMENT_AUTHOR_LINK);
-
       if (!textEl) continue;
+
+      const { authorName, authorProfileUrl } = this._extractAuthor(commentEl);
 
       comments.push({
         text: textEl.textContent.trim(),
-        authorName: authorEl ? authorEl.textContent.trim() : 'Unknown',
-        authorProfileUrl: authorLinkEl ? authorLinkEl.href || '' : '',
+        authorName,
+        authorProfileUrl,
         element: commentEl,
         timestamp: Date.now(),
       });

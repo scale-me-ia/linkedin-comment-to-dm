@@ -42,10 +42,10 @@ export const SELECTORS = {
 
 // Action delays (ms) — randomized between min and max to mimic human behavior
 export const DELAYS = {
-  BETWEEN_ACTIONS: { min: 30000, max: 120000 },    // 30s - 2min between full actions
+  BETWEEN_ACTIONS: { min: 15000, max: 60000 },     // 15s - 1min between full actions
   TYPING_CHAR: { min: 30, max: 80 },                // Per character typing speed
   BEFORE_SEND: { min: 2000, max: 5000 },            // Pause before hitting send
-  BEFORE_DM: { min: 10000, max: 60000 },            // Wait before sending DM after reply
+  BEFORE_DM: { min: 5000, max: 30000 },              // Wait before sending DM after reply
   COMMENT_SCAN_INTERVAL: { min: 30000, max: 60000 },// How often to scan for new comments
   PAGE_SCROLL: { min: 500, max: 2000 },             // Scroll pause
 };
@@ -78,6 +78,8 @@ export const STORAGE_KEYS = {
   PROCESSED_COMMENTS: 'scaleme_processed_comments',
   SETTINGS: 'scaleme_settings',
   DAILY_COUNTERS: 'scaleme_daily_counters',
+  ACTION_QUEUE: 'scaleme_action_queue',
+  COMMENT_STEPS: 'scaleme_comment_steps',
 };
 
 // Default settings
@@ -87,4 +89,10 @@ export const DEFAULT_SETTINGS = {
   notificationsEnabled: true,
   autoScrollToComments: false,
   dryRun: false, // if true, logs actions without executing
+  replyDelayMin: 30,       // seconds — global default (thematic overrides if set)
+  replyDelayMax: 90,       // seconds
+  dmDelayMin: 60,          // seconds
+  dmDelayMax: 180,         // seconds
+  betweenActionsMin: 15,   // seconds
+  betweenActionsMax: 60,   // seconds
 };

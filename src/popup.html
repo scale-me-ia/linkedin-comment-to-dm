@@ -42,7 +42,12 @@
       </div>
       <div class="stat-card">
         <div class="stat-value" id="queueCount">0</div>
+        <div class="stat-label">En file</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="pendingCount">0</div>
         <div class="stat-label">En attente</div>
+        <div class="stat-limit">connexion</div>
       </div>
     </div>
 
@@ -50,6 +55,7 @@
     <div class="tabs">
       <button class="tab active" data-tab="thematics">Thématiques</button>
       <button class="tab" data-tab="catchup">Rattrapage</button>
+      <button class="tab" data-tab="pipeline">Pipeline</button>
       <button class="tab" data-tab="logs">Logs</button>
       <button class="tab" data-tab="settings">Config</button>
     </div>
@@ -66,7 +72,7 @@
     <!-- Catchup Tab -->
     <div class="tab-content" id="tab-catchup">
       <div class="catchup-info">
-        <p>🔄 Récupère les anciens commentaires via l'API LinkedIn et envoie les DMs manqués.</p>
+        <p>🔄 Récupère les anciens commentaires via le DOM et envoie les DMs manqués.</p>
         <p class="catchup-warning">⚠️ Nécessite d'être connecté à LinkedIn dans cet onglet.</p>
       </div>
       <div class="catchup-actions">
@@ -75,6 +81,13 @@
       <div id="catchupPostsList" class="catchup-posts-list"></div>
       <div id="catchupStatus" class="catchup-status"></div>
       <button class="btn btn-primary" id="catchupRunBtn" style="display:none">🚀 Lancer le rattrapage</button>
+      <button class="btn btn-secondary" id="clearProcessedBtn" style="margin-top:6px;font-size:11px;">Effacer les commentaires traités</button>
+    </div>
+
+    <!-- Pipeline Tab -->
+    <div class="tab-content" id="tab-pipeline">
+      <div id="pipelineList" class="pipeline-list"></div>
+      <div class="empty-state" id="pipelineEmpty">Aucun commentaire en cours de traitement.</div>
     </div>
 
     <!-- Logs Tab -->
@@ -114,6 +127,55 @@
           <span class="toggle-slider"></span>
         </label>
       </div>
+      <div class="setting-row">
+        <label>Auto-catchup (4h)</label>
+        <label class="toggle">
+          <input type="checkbox" id="autoCatchupToggle">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div class="setting-hint">Scanne automatiquement les posts des thématiques toutes les 4h pour rattraper les commentaires manqués.</div>
+      <hr>
+      <div class="setting-section-title">Délais globaux (secondes)</div>
+      <div class="setting-hint">Délais par défaut. Les délais par thématique prennent le dessus si configurés.</div>
+      <div class="form-row-2col" style="margin-top:6px;margin-bottom:6px">
+        <div class="form-group">
+          <label>Réponse min</label>
+          <input type="number" id="globalReplyDelayMin" min="10" step="5">
+        </div>
+        <div class="form-group">
+          <label>Réponse max</label>
+          <input type="number" id="globalReplyDelayMax" min="15" step="5">
+        </div>
+      </div>
+      <div class="form-row-2col" style="margin-bottom:6px">
+        <div class="form-group">
+          <label>DM min</label>
+          <input type="number" id="globalDmDelayMin" min="15" step="5">
+        </div>
+        <div class="form-group">
+          <label>DM max</label>
+          <input type="number" id="globalDmDelayMax" min="30" step="5">
+        </div>
+      </div>
+      <div class="form-row-2col" style="margin-bottom:6px">
+        <div class="form-group">
+          <label>Entre actions min</label>
+          <input type="number" id="globalBetweenMin" min="5" step="5">
+        </div>
+        <div class="form-group">
+          <label>Entre actions max</label>
+          <input type="number" id="globalBetweenMax" min="10" step="5">
+        </div>
+      </div>
+      <hr>
+      <div class="setting-section-title">Diagnostic</div>
+      <div id="selectorHealth" class="selector-health"></div>
+      <div class="diagnostic-buttons">
+        <button class="btn btn-scan" id="diagnosticBtn">🩺 Diagnostic</button>
+        <button class="btn btn-scan" id="discoveryBtn">🔬 Discovery DOM</button>
+      </div>
+      <div id="diagnosticResult" class="diagnostic-result"></div>
       <hr>
       <button class="btn btn-danger" id="resetBtn">Reset tout</button>
     </div>

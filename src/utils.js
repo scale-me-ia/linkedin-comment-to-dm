@@ -122,7 +122,7 @@ export function getCommentId(postUrn, authorName, commentText) {
  * Log with prefix
  */
 export function log(level, ...args) {
-  const prefix = `[ScaleMe LinkedIn] [${level.toUpperCase()}]`;
+  const prefix = `[ScaleMe] [${level.toUpperCase()}]`;
   const timestamp = new Date().toLocaleTimeString('fr-FR');
   
   switch (level) {
